@@ -1,11 +1,18 @@
 import copy
+print("aa")
 import pickle
 
+print("as")
 import numpy as np
+print("ad")
 from skimage import io
 
+print("af")
 from ...ops.roiaware_pool3d import roiaware_pool3d_utils
+print("ag")
 from ...utils import box_utils, calibration_kitti, common_utils, object3d_kitti
+
+print("ah")
 from ..dataset import DatasetTemplate
 
 

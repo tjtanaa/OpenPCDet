@@ -57,8 +57,27 @@ def rotate_points_along_z(points, angle):
 
 
 def mask_points_by_range(points, limit_range):
-    mask = (points[:, 0] >= limit_range[0]) & (points[:, 0] <= limit_range[3]) \
-           & (points[:, 1] >= limit_range[1]) & (points[:, 1] <= limit_range[4])
+    # print("points.shape: ", points.shape)
+    # print("x min: ", np.min(points[:,0]))
+    # print("x max: ", np.max(points[:,0]))
+    # print("y min: ", np.min(points[:,1]))
+    # print("y max: ", np.max(points[:,1]))
+    # print("z min: ", np.min(points[:,2]))
+    # print("z max: ", np.max(points[:,2]))
+    # print(len(limit_range))
+
+    
+    a1 = points[:, 0] >= limit_range[0]
+
+    a2 = (points[:, 0] <= limit_range[3])
+
+    a3 = (points[:, 1] >= limit_range[1])
+
+    a4 = (points[:, 1] <= limit_range[4])
+
+    mask = np.logical_and.reduce([a1,a2,a3,a4])
+    # mask = (points[:, 0] >= limit_range[0]) & (points[:, 0] <= limit_range[3]) & (points[:, 1] >= limit_range[1]) & (points[:, 1] <= limit_range[4])
+
     return mask
 
 

@@ -13,13 +13,18 @@ class DataProcessor(object):
         self.grid_size = self.voxel_size = None
         self.data_processor_queue = []
         for cur_cfg in processor_configs:
+            print("cur_cfg.NAME: ", cur_cfg.NAME)
             cur_processor = getattr(self, cur_cfg.NAME)(config=cur_cfg)
             self.data_processor_queue.append(cur_processor)
 
     def mask_points_and_boxes_outside_range(self, data_dict=None, config=None):
+        print("before if ")
         if data_dict is None:
             return partial(self.mask_points_and_boxes_outside_range, config=config)
+
+        print("commonutils maskpointsbyrange")
         mask = common_utils.mask_points_by_range(data_dict['points'], self.point_cloud_range)
+        print("masked point")
         data_dict['points'] = data_dict['points'][mask]
         if data_dict.get('gt_boxes', None) is not None and config.REMOVE_OUTSIDE_BOXES and self.training:
             mask = box_utils.mask_boxes_outside_range_numpy(
@@ -118,8 +123,12 @@ class DataProcessor(object):
 
         Returns:
         """
-
+        
+        idx = 0
         for cur_processor in self.data_processor_queue:
+            print("idx ", idx)
+            idx+=1
+            print(type(cur_processor))
             data_dict = cur_processor(data_dict=data_dict)
 
         return data_dict

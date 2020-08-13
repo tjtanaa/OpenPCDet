@@ -4,10 +4,15 @@ from pathlib import Path
 import numpy as np
 import torch.utils.data as torch_data
 
+print("1")
 from ..utils import common_utils
+print("2")
 from .augmentor.data_augmentor import DataAugmentor
+print("3")
 from .processor.data_processor import DataProcessor
+print("4")
 from .processor.point_feature_encoder import PointFeatureEncoder
+print("1")
 
 
 class DatasetTemplate(torch_data.Dataset):
@@ -115,6 +120,7 @@ class DatasetTemplate(torch_data.Dataset):
                 ...
         """
         if self.training:
+            print("training")
             assert 'gt_boxes' in data_dict, 'gt_boxes should be provided for training'
             gt_boxes_mask = np.array([n in self.class_names for n in data_dict['gt_names']], dtype=np.bool_)
 
@@ -136,11 +142,14 @@ class DatasetTemplate(torch_data.Dataset):
             gt_boxes = np.concatenate((data_dict['gt_boxes'], gt_classes.reshape(-1, 1).astype(np.float32)), axis=1)
             data_dict['gt_boxes'] = gt_boxes
 
+        print("point encoder")
         data_dict = self.point_feature_encoder.forward(data_dict)
 
+        print("data processor")
         data_dict = self.data_processor.forward(
             data_dict=data_dict
         )
+        print("pop")
         data_dict.pop('gt_names', None)
 
         return data_dict
