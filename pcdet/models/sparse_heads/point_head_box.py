@@ -1,10 +1,10 @@
 import torch
 
 from ...utils import box_coder_utils, box_utils
-from .point_head_template import PointHeadTemplate
+from .point_head_template import SparsePointHeadTemplate
 
 
-class PointHeadBox(PointHeadTemplate):
+class PointHeadBox(SparsePointHeadTemplate):
     """
     A simple point-based segmentation head, which are used for PointRCNN.
     Reference Paper: https://arxiv.org/abs/1812.04244
@@ -51,13 +51,13 @@ class PointHeadBox(PointHeadTemplate):
             gt_boxes.view(-1, gt_boxes.shape[-1]), extra_width=self.model_cfg.TARGET_CONFIG.GT_EXTRA_WIDTH
         ).view(batch_size, -1, gt_boxes.shape[-1])
 
-        # print("extend_gt_boxes: ", extend_gt_boxes.shape)
+        print("extend_gt_boxes: ", extend_gt_boxes.shape)
         targets_dict = self.assign_stack_targets(
             points=point_coords, gt_boxes=gt_boxes, extend_gt_boxes=extend_gt_boxes,
             set_ignore_flag=True, use_ball_constraint=False,
             ret_part_labels=False, ret_box_labels=True
         )
-        # print("targets_dict: ", targets_dict)
+        print("targets_dict: ", targets_dict)
 
         return targets_dict
 
@@ -91,11 +91,11 @@ class PointHeadBox(PointHeadTemplate):
         else:
             point_features = batch_dict['point_features']
 
-        # print("point_features.shape: ", point_features.shape)
+        print("point_features.shape: ", point_features.shape)
         point_cls_preds = self.cls_layers(point_features)  # (total_points, num_class)
         point_box_preds = self.box_layers(point_features)  # (total_points, box_code_size)
 
-        # print("point_cls_preds.shape: ", point_cls_preds.shape)
+        print("point_cls_preds.shape: ", point_cls_preds.shape)
 
         point_cls_preds_max, _ = point_cls_preds.max(dim=-1)
         batch_dict['point_cls_scores'] = torch.sigmoid(point_cls_preds_max)

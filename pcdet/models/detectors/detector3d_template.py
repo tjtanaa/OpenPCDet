@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from ...ops.iou3d_nms import iou3d_nms_utils
 from ...utils.spconv_utils import find_all_spconv_keys
-from .. import backbones_2d, backbones_3d, dense_heads, roi_heads
+from .. import backbones_2d, backbones_3d, dense_heads, roi_heads, sparse_heads
 from ..backbones_2d import map_to_bev
 from ..backbones_3d import pfe, vfe
 from ..model_utils import model_nms_utils
@@ -156,6 +156,27 @@ class Detector3DTemplate(nn.Module):
 
         model_info_dict['module_list'].append(point_head_module)
         return point_head_module, model_info_dict
+
+    # ## ADDED SPARSE POINT HEAD
+    # def build_sparse_point_head(self, model_info_dict):
+    #     if self.model_cfg.get('SPARSE_POINT_HEAD', None) is None:
+    #         return None, model_info_dict
+
+    #     if self.model_cfg.SPARSE_POINT_HEAD.get('USE_POINT_FEATURES_BEFORE_FUSION', False):
+    #         num_point_features = model_info_dict['num_point_features_before_fusion']
+    #     else:
+    #         num_point_features = model_info_dict['num_point_features']
+
+    #     point_head_module = sparse_heads.__all__[self.model_cfg.SPARSE_POINT_HEAD.NAME](
+    #         model_cfg=self.model_cfg.SPARSE_POINT_HEAD,
+    #         input_channels=num_point_features,
+    #         num_class=self.num_class if not self.model_cfg.SPARSE_POINT_HEAD.CLASS_AGNOSTIC else 1,
+    #         predict_boxes_when_training=self.model_cfg.get('ROI_HEAD', False)
+    #     )
+    #     print("point_head_module: ", point_head_module )
+
+    #     model_info_dict['module_list'].append(point_head_module)
+    #     return point_head_module, model_info_dict
 
     def build_roi_head(self, model_info_dict):
         if self.model_cfg.get('ROI_HEAD', None) is None:

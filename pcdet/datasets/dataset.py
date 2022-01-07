@@ -181,10 +181,13 @@ class DatasetTemplate(torch_data.Dataset):
                     ret[key] = np.concatenate(val, axis=0)
                 elif key in ['points', 'voxel_coords']:
                     coors = []
+                    num_points = []
                     for i, coor in enumerate(val):
                         coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
                         coors.append(coor_pad)
+                        num_points.append(coor_pad.shape[0])
                     ret[key] = np.concatenate(coors, axis=0)
+                    ret['num_points'] = np.array(num_points).astype(np.int32)
                 elif key in ['gt_boxes']:
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)

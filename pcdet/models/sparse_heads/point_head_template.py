@@ -6,7 +6,7 @@ from ...ops.roiaware_pool3d import roiaware_pool3d_utils
 from ...utils import common_utils, loss_utils
 
 
-class PointHeadTemplate(nn.Module):
+class SparsePointHeadTemplate(nn.Module):
     def __init__(self, model_cfg, num_class):
         super().__init__()
         self.model_cfg = model_cfg
@@ -71,13 +71,12 @@ class PointHeadTemplate(nn.Module):
             'extend_gt_boxes.shape=%s' % str(extend_gt_boxes.shape)
         assert set_ignore_flag != use_ball_constraint, 'Choose one only!'
         batch_size = gt_boxes.shape[0]
-        bs_idx = points[:, 0].type(torch.int32)
+        bs_idx = points[:, 0]
         point_cls_labels = points.new_zeros(points.shape[0]).long()
         point_box_labels = gt_boxes.new_zeros((points.shape[0], 8)) if ret_box_labels else None
         point_part_labels = gt_boxes.new_zeros((points.shape[0], 3)) if ret_part_labels else None
         for k in range(batch_size):
             bs_mask = (bs_idx == k)
-            # print("bs_mask: ", torch.sum(bs_mask))
             points_single = points[bs_mask][:, 1:4]
             point_cls_labels_single = point_cls_labels.new_zeros(bs_mask.sum())
             box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(

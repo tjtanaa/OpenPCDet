@@ -7,7 +7,7 @@ from ...utils import common_utils
 from .roi_head_template import RoIHeadTemplate
 
 
-class PointRCNNHead(RoIHeadTemplate):
+class DVPDetHead(RoIHeadTemplate):
     def __init__(self, input_channels, model_cfg, num_class=1, **kwargs):
         super().__init__(num_class=num_class, model_cfg=model_cfg)
         self.model_cfg = model_cfg
@@ -147,7 +147,7 @@ class PointRCNNHead(RoIHeadTemplate):
 
         pooled_features = self.roipool3d_gpu(batch_dict)  # (total_rois, num_sampled_points, 3 + C)
 
-        print("pooled_feature: ", pooled_features.shape)
+        
 
         xyz_input = pooled_features[..., 0:self.num_prefix_channels].transpose(1, 2).unsqueeze(dim=3).contiguous()
         xyz_features = self.xyz_up_layer(xyz_input)

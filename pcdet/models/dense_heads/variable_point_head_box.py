@@ -4,7 +4,7 @@ from ...utils import box_coder_utils, box_utils
 from .point_head_template import PointHeadTemplate
 
 
-class PointHeadBox(PointHeadTemplate):
+class VariablePointHeadBox(PointHeadTemplate):
     """
     A simple point-based segmentation head, which are used for PointRCNN.
     Reference Paper: https://arxiv.org/abs/1812.04244

@@ -115,5 +115,37 @@ if __name__ == '__main__':
 
                 ],
             ),
+            make_cuda_ext(
+                name='grid_sampling_cuda',
+                module='pcdet.ops.dvp_conv',
+                sources=[
+                    'src/grid_sampling_cuda.cpp',
+                    'src/grid_sampling_cuda_kernel.cu'
+                ]
+            ),
+            make_cuda_ext(
+                name='voxel_sampling_idx_binary_cuda',
+                module='pcdet.ops.dvp_conv',
+                sources=[
+                    'src/voxel_sampling_idx_binary_cuda.cpp',
+                    'src/voxel_sampling_idx_binary_cuda_kernel.cu'
+                ]
+            ),
+            make_cuda_ext(
+                name='voxel_sampling_idx_cuda',
+                module='pcdet.ops.dvp_conv',
+                sources=[
+                    'src/voxel_sampling_idx_cuda.cpp',
+                    'src/voxel_sampling_idx_cuda_kernel.cu'
+                ]
+            ),
+            make_cuda_ext(
+                name='voxel_sampling_feature_cuda',
+                module='pcdet.ops.dvp_conv',
+                sources=[
+                    'src/voxel_sampling_feature_cuda.cpp',
+                    'src/voxel_sampling_feature_cuda_kernel.cu'
+                ]
+            )
         ],
     )
