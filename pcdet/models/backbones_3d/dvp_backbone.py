@@ -481,8 +481,16 @@ class VariableDynamicPointConvBackBone(nn.Module):
         coors, features, num_list = points[:,1:4].contiguous(), points[:,4:].contiguous(), num_points_list
         # concat_features = features
         voxel_idx, center_idx = None, None
-        
+        # print(num_list)
         for i in range(len(self.dvp_conv_layers)):
+            # viz_coors = coors.detach().cpu().numpy()[:int(num_list.detach().cpu().numpy()[0])]
+
+            # intensity = np.sum(features.detach().cpu().numpy()[:int(num_list.detach().cpu().numpy()[0])], axis=1)
+
+            # Converter.compile(coors=viz_coors[:,[1,2,0]],
+            #                 intensity=intensity,
+            #                 task_name='voxel_sampling_feature_2_' + str(i))
+
             coors, features, num_list, voxel_idx, center_idx = \
                 self.dvp_conv_layers[i](coors,
                                         features,
@@ -491,6 +499,7 @@ class VariableDynamicPointConvBackBone(nn.Module):
                                         center_idx,
                                         mem_saving=self.mem_saving)
 
+        # exit()
         batch_id_torch_cuda = torch.zeros((coors.shape[0], 1), 
             dtype=torch.float32,
             device=coors.device)

@@ -60,7 +60,8 @@ class DVPDetHead(RoIHeadTemplate):
             num_sampled_points=self.model_cfg.ROI_POINT_POOL.NUM_SAMPLED_POINTS,
             pool_extra_width=self.model_cfg.ROI_POINT_POOL.POOL_EXTRA_WIDTH
         )
-        self.init_weights(weight_init='xavier')
+        # self.init_weights(weight_init='xavier')
+        self.init_weights(weight_init='normal')
 
     def init_weights(self, weight_init='xavier'):
         if weight_init == 'kaiming':
@@ -69,17 +70,25 @@ class DVPDetHead(RoIHeadTemplate):
             init_func = nn.init.xavier_normal_
         elif weight_init == 'normal':
             init_func = nn.init.normal_
+            init_func = nn.init.trunc_normal_
         else:
             raise NotImplementedError
 
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv1d):
-                if weight_init == 'normal':
-                    init_func(m.weight, mean=0, std=0.001)
-                else:
-                    init_func(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+            # if isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv1d):
+            #     if weight_init == 'normal':
+            #         init_func(m.weight, mean=0, std=0.001)
+            #     else:
+            #         init_func(m.weight)
+            #     if m.bias is not None:
+            #         nn.init.constant_(m.bias, 0)
+            # else:
+            if weight_init == 'normal':
+                init_func(m.weight, mean=0, std=0.001)
+            else:
+                init_func(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
         nn.init.normal_(self.reg_layers[-1].weight, mean=0, std=0.001)
 
     def roipool3d_gpu(self, batch_dict):

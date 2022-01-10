@@ -18,7 +18,8 @@ class PointHeadTemplate(nn.Module):
     def build_losses(self, losses_cfg):
         self.add_module(
             'cls_loss_func',
-            loss_utils.SigmoidFocalClassificationLoss(alpha=0.25, gamma=2.0)
+            loss_utils.SigmoidFocalClassificationLoss(alpha=0.75, gamma=2.0)
+            # loss_utils.SigmoidFocalClassificationLoss(alpha=0.25, gamma=2.0)
         )
         reg_loss_type = losses_cfg.get('LOSS_REG', None)
         if reg_loss_type == 'smooth-l1':
@@ -84,6 +85,7 @@ class PointHeadTemplate(nn.Module):
                 points_single.unsqueeze(dim=0), gt_boxes[k:k + 1, :, 0:7].contiguous()
             ).long().squeeze(dim=0)
             box_fg_flag = (box_idxs_of_pts >= 0)
+            # print(torch.sum(box_fg_flag))
             if set_ignore_flag:
                 extend_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
                     points_single.unsqueeze(dim=0), extend_gt_boxes[k:k+1, :, 0:7].contiguous()

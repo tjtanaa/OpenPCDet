@@ -58,6 +58,7 @@ class VariablePointHeadBox(PointHeadTemplate):
             ret_part_labels=False, ret_box_labels=True
         )
         # print("targets_dict: ", targets_dict)
+        # exit()
 
         return targets_dict
 
@@ -94,8 +95,9 @@ class VariablePointHeadBox(PointHeadTemplate):
         # print("point_features.shape: ", point_features.shape)
         point_cls_preds = self.cls_layers(point_features)  # (total_points, num_class)
         point_box_preds = self.box_layers(point_features)  # (total_points, box_code_size)
-
         # print("point_cls_preds.shape: ", point_cls_preds.shape)
+        # print("point_box_preds.shape: ", point_box_preds.shape)
+        # exit()
 
         point_cls_preds_max, _ = point_cls_preds.max(dim=-1)
         batch_dict['point_cls_scores'] = torch.sigmoid(point_cls_preds_max)

@@ -83,6 +83,7 @@ class SparsePointHeadTemplate(nn.Module):
                 points_single.unsqueeze(dim=0), gt_boxes[k:k + 1, :, 0:7].contiguous()
             ).long().squeeze(dim=0)
             box_fg_flag = (box_idxs_of_pts >= 0)
+
             if set_ignore_flag:
                 extend_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
                     points_single.unsqueeze(dim=0), extend_gt_boxes[k:k+1, :, 0:7].contiguous()
@@ -120,7 +121,7 @@ class SparsePointHeadTemplate(nn.Module):
                 offset = torch.tensor([0.5, 0.5, 0.5]).view(1, 3).type_as(transformed_points)
                 point_part_labels_single[fg_flag] = (transformed_points / gt_box_of_fg_points[:, 3:6]) + offset
                 point_part_labels[bs_mask] = point_part_labels_single
-
+        
         targets_dict = {
             'point_cls_labels': point_cls_labels,
             'point_box_labels': point_box_labels,

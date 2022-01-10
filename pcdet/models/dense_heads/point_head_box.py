@@ -96,6 +96,7 @@ class PointHeadBox(PointHeadTemplate):
         point_box_preds = self.box_layers(point_features)  # (total_points, box_code_size)
 
         # print("point_cls_preds.shape: ", point_cls_preds.shape)
+        
 
         point_cls_preds_max, _ = point_cls_preds.max(dim=-1)
         batch_dict['point_cls_scores'] = torch.sigmoid(point_cls_preds_max)

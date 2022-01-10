@@ -201,15 +201,10 @@ class VoxelSamplingFeatureFunction(Function):
         """
         Args:
             ctx:
-            rois: (N, 7) [x, y, z, dx, dy, dz, heading] (x, y, z) is the box center
-            pts: (npoints, 3)
-            pts_feature: (npoints, C)
-            out_size: int or tuple, like 7 or (7, 7, 7)
-            max_pts_each_voxel:
-            pool_method: 'max' or 'avg'
+            input_features: (npoints, C)
 
         Returns:
-            pooled_features: (N, out_x, out_y, out_z, C)
+            
         """
         # assert rois.shape[1] == 7 and pts.shape[1] == 3
         # if isinstance(out_size, int):

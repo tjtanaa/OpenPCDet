@@ -384,3 +384,239 @@ class RegLossCenterNet(nn.Module):
             pred = _transpose_and_gather_feat(output, ind)
         loss = _reg_loss(pred, target, mask)
         return loss
+
+
+
+
+class IoU3DLossVariablePointHead(nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        
+        self.eps = torch.constant(1e-6)
+        
+    def _roi_logits_to_attrs(self, base_coors, input_logits, anchor_size):
+        anchor_diag = torch.sqrt(torch.pow(anchor_size[0], 2.) + torch.pow(anchor_size[1], 2.))
+        x = torch.clamp(input_logits[:, 0] * anchor_diag + base_coors[:, 0], -1e7, 1e7)
+        y = torch.clamp(input_logits[:, 1] * anchor_diag + base_coors[:, 1], -1e7, 1e7)
+        z = torch.clamp(input_logits[:, 2] * anchor_diag + base_coors[:, 2], -1e7, 1e7)
+
+        w = torch.clamp(torch.exp(input_logits[:,3]) * anchor_size[0], 0., 1e7 )
+        l = torch.clamp(torch.exp(input_logits[:,4]) * anchor_size[1], 0., 1e7 )
+        h = torch.clamp(torch.exp(input_logits[:,5]) * anchor_size[2], 0., 1e7 )
+
+        r = torch.clamp(torch.atan2(input_logits[:,6], input_logits[:,7]), -1e7, 1e7)
+
+        return torch.stack([w, l, h, x, y, z, r], axis=-1)
+
+    def _get_rotation_matrix(self, r):
+        rotation_matrix = torch.stack([torch.cos(r), -torch.sin(r), torch.sin(r), torch.cos(r)], axis=-1)
+        rotation_matrix = torch.reshape(rotation_matrix, shape=[-1, 2, 2]) # [n, 2, 2]
+        return rotation_matrix
+
+    def _get_2d_vertex_points(self, gt_attrs, pred_attrs):
+        gt_w = gt_attrs[:, 0]  # [n]
+        gt_l = gt_attrs[:, 1]  # [n]
+        gt_x = gt_attrs[:, 3]  # [n]
+        gt_y = gt_attrs[:, 4]  # [n]
+        gt_r = gt_attrs[:, 6]  # [n]
+
+        gt_v0 = torch.stack([gt_w / 2, -gt_l / 2], axis=-1)  # [n, 2]
+        gt_v1 = torch.stack([gt_w / 2, gt_l / 2], axis=-1)  # [n, 2]
+        gt_v2 = torch.stack([-gt_w / 2, gt_l / 2], axis=-1)  # [n, 2]
+        gt_v3 = torch.stack([-gt_w / 2, -gt_l / 2], axis=-1)  # [n, 2]
+        gt_v = torch.stack([gt_v0, gt_v1, gt_v2, gt_v3], axis=1)  # [n, 4, 2]
+
+        pred_w = pred_attrs[:, 0]  # [n]
+        pred_l = pred_attrs[:, 1]  # [n]
+        pred_x = pred_attrs[:, 3]  # [n]
+        pred_y = pred_attrs[:, 4]  # [n]
+        pred_r = pred_attrs[:, 6]  # [n]
+
+        rel_x = pred_x - gt_x  # [n]
+        rel_y = pred_y - gt_y  # [n]
+        rel_r = pred_r - gt_r  # [n]
+        rel_xy = torch.unsqueeze(torch.stack([rel_x, rel_y], axis=-1), axis=1)  # [n, 1, 2]
+
+        pred_v0 = torch.stack([pred_w / 2, -pred_l / 2], axis=-1)  # [n, 2]
+        pred_v1 = torch.stack([pred_w / 2, pred_l / 2], axis=-1)  # [n, 2]
+        pred_v2 = torch.stack([-pred_w / 2, pred_l / 2], axis=-1)  # [n, 2]
+        pred_v3 = torch.stack([-pred_w / 2, -pred_l / 2], axis=-1)  # [n, 2]
+        pred_v = torch.stack([pred_v0, pred_v1, pred_v2, pred_v3], axis=1)  # [n, 4, 2]
+
+        rot_pred_v = torch.transpose(torch.matmul(a=self.get_rotation_matrix(rel_r), b=pred_v, transpose_b=True),
+                                perm=[0, 2, 1])  # [n, 4, 2]
+        rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-gt_r), b=rel_xy, transpose_b=True),
+                                perm=[0, 2, 1])  # [n, 1, 2]
+        rel_rot_pred_v = rot_pred_v + rot_rel_xy  # [n, 4, 2]
+
+        rot_gt_v = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-rel_r), b=gt_v, transpose_b=True),
+                                perm=[0, 2, 1])  # [n, 4, 2]
+        rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-pred_r), b=-rel_xy, transpose_b=True),
+                                perm=[0, 2, 1])  # [n, 1, 2]
+        rel_rot_gt_v = rot_gt_v + rot_rel_xy  # [n, 4, 2]
+
+        # [n, 2, 2] @ [n, 2, 4] = [n, 2, 4] -> [n, 4, 2]
+
+        return gt_v, rel_rot_pred_v, rel_rot_gt_v, rel_xy, rel_r
+
+
+    def _get_2d_intersection_points(self, gt_attrs, rel_rot_pred_v):
+        gt_w = gt_attrs[:, 0]  # [n]
+        gt_l = gt_attrs[:, 1]  # [n]
+        output_points = []
+        for i in [-1, 0, 1, 2]:
+            v0_x = rel_rot_pred_v[:, i, 0]  # [n]
+            v0_y = rel_rot_pred_v[:, i, 1]  # [n]
+            v1_x = rel_rot_pred_v[:, i + 1, 0]  # [n]
+            v1_y = rel_rot_pred_v[:, i + 1, 1]  # [n]
+
+            kx = torch.nan_to_num(torch.div(v1_y - v0_y, v1_x - v0_x))
+            bx = torch.nan_to_num(torch.div(v0_y * v1_x - v1_y * v0_x, v1_x - v0_x))
+            ky = torch.nan_to_num(torch.div(v1_x - v0_x, v1_y - v0_y))
+            by = torch.nan_to_num(torch.div(v1_y * v0_x - v0_y * v1_x, v1_y - v0_y))
+
+            # kx = (v1_y - v0_y) / (v1_x - v0_x + eps) # [n]
+            # bx = (v0_y * v1_x - v1_y * v0_x) / (v1_x - v0_x + eps) # [n]
+            # ky = (v1_x - v0_x) / (v1_y - v0_y + eps) # [n]
+            # by = (v1_y * v0_x - v0_y * v1_x) / (v1_y - v0_y + eps) # [n]
+
+            p0 = torch.stack([gt_w / 2, kx * gt_w / 2 + bx], axis=-1)  # [n, 2]
+            p1 = torch.stack([-gt_w / 2, -kx * gt_w / 2 + bx], axis=-1)  # [n, 2]
+            p2 = torch.stack([ky * gt_l / 2 + by, gt_l / 2], axis=-1)  # [n, 2]
+            p3 = torch.stack([-ky * gt_l / 2 + by, -gt_l / 2], axis=-1)  # [n, 2]
+            p = torch.stack([p0, p1, p2, p3], axis=1)  # [n, 4, 2]
+            output_points.append(p)
+        output_points = torch.concat(output_points, axis=1)  # [n, 16, 2]
+        return output_points
+
+
+    def _get_interior_vertex_points_mask(self, target_attrs, input_points):
+        target_w = torch.unsqueeze(target_attrs[:, 0], axis=1)  # [n, 1, 16]
+        target_l = torch.unsqueeze(target_attrs[:, 1], axis=1)  # [n, 1, 16]
+        target_x = target_w / 2  # [n, 4]
+        target_y = target_l / 2  # [n, 4]
+        x_mask = torch.le(torch.abs(input_points[:, :, 0]), target_x).type(torch.float32)  # [n, 4]
+        y_mask = torch.le(torch.abs(input_points[:, :, 1]), target_y).type(torch.float32)   # [n, 4]
+        return x_mask * y_mask  # [n, 4]
+
+    def _get_intersection_points_mask(self, target_attrs, input_points, rel_xy=None, rel_r=None):
+        if rel_xy is not None and rel_r is not None:
+            pred_r = target_attrs[:, 6]  # [n]
+            rot_input_points = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-rel_r), b=input_points, transpose_b=True),
+                                            perm=[0, 2, 1])  # [n, 16, 2]
+            rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-pred_r), b=-rel_xy, transpose_b=True),
+                                    perm=[0, 2, 1])  # [n, 1, 2]
+            rel_rot_input_points = rot_input_points + rot_rel_xy
+        else:
+            rel_rot_input_points = input_points
+        target_w = torch.unsqueeze(target_attrs[:, 0], axis=1)  # [n, 1, 16]
+        target_l = torch.unsqueeze(target_attrs[:, 1], axis=1)  # [n, 1, 16]
+        target_x = target_w / 2 + 1e-3  # [n, 4]
+        target_y = target_l / 2 + 1e-3  # [n, 4]
+        # target_x = 1000  # [n, 4]
+        # target_y = 1000  # [n, 4]
+        max_x_mask = torch.le(torch.abs(rel_rot_input_points[:, :, 0]), target_x).type(torch.float32)  # [n, 4]
+        max_y_mask = torch.le(torch.abs(rel_rot_input_points[:, :, 1]), target_y).type(torch.float32)  # [n, 4]
+        return max_x_mask * max_y_mask  # [n, 4]
+
+
+    def _clockwise_sorting(self, input_points, masks):
+        coors_masks = torch.stack([masks, masks], axis=-1)  # [n, 24, 2]
+        masked_points = input_points * coors_masks
+        centers = torch.nan_to_num(torch.div(torch.sum(masked_points, axis=1, keepdim=True),
+                                        (torch.sum(coors_masks, axis=1, keepdim=True))))  # [n, 1, 2]
+        rel_vectors = input_points - centers  # [n, 24, 2]
+        base_vector = rel_vectors[:, :1, :]  # [n, 1, 2]
+        # https://stackoverflow.com/questions/14066933/direct-way-of-computing-clockwise-angle-between-2-vectors/16544330#16544330
+        dot = base_vector[:, :, 0] * rel_vectors[:, :, 0] + base_vector[:, :, 1] * rel_vectors[:, :, 1]  # [n, 24]
+        det = base_vector[:, :, 0] * rel_vectors[:, :, 1] - base_vector[:, :, 1] * rel_vectors[:, :, 0]  # [n, 24]
+        angles = torch.atan2(det + self.eps, dot + self.eps)  # [n, 24] -pi~pi
+        angles_masks = (0.5 - (masks - 0.5)) * 1000.  # [n, 24]
+        masked_angles = angles + angles_masks  # [n, 24]
+        _, sort_idx = torch.topk(-masked_angles, k=input_points.get_shape().as_list()[1], sorted=True)  # [n, 24]
+
+        batch_id = torch.range(start=0, limit=input_points.shape[0], dtype=torch.int32)
+        batch_ids = torch.stack([batch_id] * input_points.get_shape().as_list()[1], axis=1)
+        sort_idx = torch.stack([batch_ids, sort_idx], axis=-1)  # [n, 24, 2]
+
+        
+        sorted_points = input_points.index_select(0, sort_idx)
+        sorted_masks = masks.index_select(0, sort_idx)
+
+        # sorted_points = tf.gather_nd(input_points, sort_idx)
+        # sorted_masks = tf.gather_nd(masks, sort_idx)
+
+        return sorted_points, sorted_masks
+
+
+
+    def _shoelace_intersection_area(self, sorted_points, sorted_masks):
+        # https://en.wikipedia.org/wiki/Shoelace_formula
+        sorted_points = sorted_points * torch.stack([sorted_masks, sorted_masks], axis=-1)  # [n, 24, 2]
+        last_vertex_id = (torch.sum(sorted_masks, axis=1) - 1).type(torch.int32)  # [n] coors where idx=-1 will be convert to [0., 0.], so it's safe.
+        last_vertex_id = torch.stack([torch.range(start=0, limit=sorted_points.shape[0], dtype=torch.int32), last_vertex_id],
+                                axis=-1)  # [n, 2]
+        last_vertex_to_duplicate = torch.unsqueeze(sorted_points.index_select(0, last_vertex_id), axis=1)  # [n, 1, 2]
+        padded_sorted_points = torch.cat([last_vertex_to_duplicate, sorted_points], axis=1)  # [n, 24+1, 2]
+        x_i = padded_sorted_points[:, :-1, 0]  # [n, 24]
+        x_i_plus_1 = padded_sorted_points[:, 1:, 0]  # [n, 24]
+        y_i = padded_sorted_points[:, :-1, 1]  # [n, 24]
+        y_i_plus_1 = padded_sorted_points[:, 1:, 1]  # [n, 24]
+        area = 0.5 * torch.sum(x_i * y_i_plus_1 - x_i_plus_1 * y_i, axis=-1)  # [n]
+        return area
+
+
+    def _get_intersection_height(self, gt_attrs, pred_attrs):
+        gt_h = gt_attrs[:, 2]
+        gt_z = gt_attrs[:, 5]
+        pred_h = pred_attrs[:, 2]
+        pred_z = pred_attrs[:, 5]
+        gt_low = gt_z - 0.5 * gt_h
+        gt_high = gt_z + 0.5 * gt_h
+        pred_low = pred_z - 0.5 * pred_h
+        pred_high = pred_z + 0.5 * pred_h
+        top = torch.minimum(gt_high, pred_high)
+        bottom = torch.maximum(gt_low, pred_low)
+        intersection_height = F.ReLU(top - bottom)
+        return intersection_height
+
+
+    def _get_3d_iou_from_area(self, gt_attrs, pred_attrs, intersection_2d_area, intersection_height, clip):
+        intersection_volume = intersection_2d_area * intersection_height
+        gt_volume = gt_attrs[:, 0] * gt_attrs[:, 1] * gt_attrs[:, 2]
+        pred_volume = pred_attrs[:, 0] * pred_attrs[:, 1] * pred_attrs[:, 2]
+        iou = torch.nan_to_num(torch.div(intersection_volume, gt_volume + pred_volume - intersection_volume))
+        # tf.summary.scalar('iou_nan_sum',
+        #                   hvd.allreduce(tf.reduce_sum(tf.cast(tf.is_nan(iou), dtype=tf.float32)), average=False))
+        if clip:
+            iou = torch.where(torch.is_nan(iou), torch.zeros_like(iou), iou)
+        return iou
+
+
+
+    def _cal_3d_iou(self, gt_attrs, pred_attrs, clip=False):
+        gt_v, rel_rot_pred_v, rel_rot_gt_v, rel_xy, rel_r = self._get_2d_vertex_points(gt_attrs, pred_attrs)
+        intersection_points = self._get_2d_intersection_points(gt_attrs=gt_attrs, rel_rot_pred_v=rel_rot_pred_v)
+        gt_vertex_points_inside_pred = self._get_interior_vertex_points_mask(target_attrs=pred_attrs, input_points=rel_rot_gt_v)
+        pred_vertex_points_inside_gt = self._get_interior_vertex_points_mask(target_attrs=gt_attrs, input_points=rel_rot_pred_v)
+        pred_intersect_with_gt = self._get_intersection_points_mask(target_attrs=gt_attrs, input_points=intersection_points)
+        intersection_points_inside_pred = self._get_intersection_points_mask(target_attrs=pred_attrs,
+                                                                    input_points=intersection_points, rel_xy=rel_xy,
+                                                                    rel_r=rel_r)
+        total_points = torch.cat([gt_v, rel_rot_pred_v, intersection_points], axis=1)
+        total_masks = torch.cat([gt_vertex_points_inside_pred, pred_vertex_points_inside_gt,
+                                pred_intersect_with_gt * intersection_points_inside_pred], axis=1)
+        sorted_points, sorted_masks = self._clockwise_sorting(input_points=total_points, masks=total_masks)
+
+        intersection_2d_area = self._shoelace_intersection_area(sorted_points, sorted_masks)
+        intersection_height = self._get_intersection_height(gt_attrs, pred_attrs)
+        ious = self._get_3d_iou_from_area(gt_attrs, pred_attrs, intersection_2d_area, intersection_height, clip)
+
+        return ious
+
+    def forward(self):
+        pass
+
+
+
