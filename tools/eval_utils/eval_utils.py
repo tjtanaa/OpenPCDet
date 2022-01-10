@@ -8,6 +8,10 @@ import tqdm
 from pcdet.models import load_data_to_gpu
 from pcdet.utils import common_utils
 
+# from point_viz.converter import PointvizConverter
+# # from tqdm import tqdm
+
+# Converter = PointvizConverter("/media/data2/dvpdet_visualization")
 
 def statistics_info(cfg, ret_dict, metric, disp_dict):
     for cur_thresh in cfg.MODEL.POST_PROCESSING.RECALL_THRESH_LIST:
@@ -56,6 +60,66 @@ def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, sa
         with torch.no_grad():
             pred_dicts, ret_dict = model(batch_dict)
         disp_dict = {}
+
+        # print(batch_dict.keys(), len(pred_dicts), pred_dicts[0].keys())
+        # # print('num_points: ', batch_dict['num_points'])
+        # # print('points: ', batch_dict['points'].shape)
+        # # print('point_coords: ', batch_dict['point_coords'].shape)
+        # # print('point_features: ', batch_dict['point_features'].shape)
+        # # print('roi_0.7: ',ret_dict['roi_0.7'])
+        # # print("rcnn_0.7: ",ret_dict['rcnn_0.7'])
+        # # print(pred_dicts[0]['pred_boxes'])
+        # # print(pred_dicts[0]['pred_scores'])
+        # # print(pred_dicts[0]['pred_labels'])
+
+        # gt_bboxes = batch_dict['gt_boxes'][0].detach().cpu().numpy()
+
+        # gt_class = gt_bboxes[:,7]
+        # valid_gt_mask = gt_class > 0
+        # # print(gt_bboxes.shape)
+        # gt_bboxes = gt_bboxes[valid_gt_mask, :7]
+        # # exit()
+        # if np.sum(valid_gt_mask) > 0:
+        #     gt_bbox_params = gt_bboxes[:,[4,5,3,1,2,0,6]].tolist()
+        #     for j in range(len(gt_bboxes)):
+        #         gt_bbox_params[j].append("Green")
+        #         gt_bbox_params[j].append("")
+        # else:
+        #     gt_bbox_params = []
+
+
+        # pred_scores = pred_dicts[0]['pred_scores'].detach().cpu().numpy()
+        # pred_bboxes = pred_dicts[0]['pred_boxes'].detach().cpu().numpy()
+        # pred_bbox_params =  pred_bboxes[:,[4,5,3,1,2,0,6]].tolist()
+
+        # for j in range(len(pred_scores)):
+        #     if pred_scores[j] > 0.65:
+        #         pred_bbox_params[j].append("Red")
+        #     else:
+        #         pred_bbox_params[j].append("Blue")
+        #     pred_bbox_params[j].append(str(pred_scores[j]))
+
+        # batch_indices_np = batch_dict['num_points'].detach().cpu().numpy()
+
+        
+        # # valid_gt_mask = gt_class > 0
+
+        # # print(gt_bbox_params)
+        # # print(pred_bbox_params)
+
+        # # print(gt_bbox_params + pred_bbox_params)
+
+        # coors = batch_dict['points'].detach().cpu().numpy()[:int(batch_indices_np[0]),1:4]
+        # feature = batch_dict['points'].detach().cpu().numpy()[:int(batch_indices_np[0]),4:]
+        # intensity = np.sum(feature, axis=1)
+        # Converter.compile(coors=coors[:,[1,2,0]],
+        #                 intensity=intensity,
+        #                 task_name='inference_sample_' + str(i),
+        #                 bbox_params=gt_bbox_params + pred_bbox_params)
+        # # exit()
+
+        # if i == 10:
+        #     exit()
 
         statistics_info(cfg, ret_dict, metric, disp_dict)
         annos = dataset.generate_prediction_dicts(
