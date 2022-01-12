@@ -62,6 +62,100 @@ class VariablePointHeadBox(PointHeadTemplate):
 
         return targets_dict
 
+
+    def get_box_layer_loss(self, tb_dict=None):
+        pos_mask = self.forward_ret_dict['point_cls_labels'] > 0
+        point_box_labels = self.forward_ret_dict['point_box_labels']
+        point_box_preds = self.forward_ret_dict['point_box_preds']
+
+        reg_weights = pos_mask.float()
+        pos_normalizer = pos_mask.sum().float()
+        reg_weights /= torch.clamp(pos_normalizer, min=1.0)
+        
+        point_cls_labels = self.forward_ret_dict['point_cls_labels'].view(-1)
+        point_cls_preds = self.forward_ret_dict['point_cls_preds'].view(-1, self.num_class)
+
+        # print("self.forward_ret_dict['point_cls_labels']: ", self.forward_ret_dict['point_cls_labels'])
+
+        one_hot_targets = point_cls_preds.new_zeros(*list(point_cls_labels.shape), self.num_class + 1)
+        one_hot_targets.scatter_(-1, (point_cls_labels * (point_cls_labels >= 0).long()).unsqueeze(dim=-1).long(), 1.0)
+        one_hot_targets = one_hot_targets[..., 1:]
+
+        _, point_box_labels_physical = self.generate_predicted_boxes(
+            points=self.forward_ret_dict['point_coords'][:, 1:4],
+            point_cls_preds=one_hot_targets, point_box_preds=point_box_labels
+        )
+
+        # print("point_box_labels_physical: ", point_box_labels_physical)
+
+        _, point_box_preds_physical = self.generate_predicted_boxes(
+            points=self.forward_ret_dict['point_coords'][:, 1:4],
+            point_cls_preds=one_hot_targets, point_box_preds=point_box_preds
+        )
+        # print("point_box_preds_physical: ", point_box_preds_physical)
+
+        point_iou_loss_box = self.reg_loss_func(point_box_labels_physical, point_box_preds_physical, pos_mask, clip=False)
+
+        # ious = self.reg_loss_func(point_box_labels_physical, point_box_preds_physical, pos_mask, clip=False)
+        
+        # point_loss_box_src = 1. - ious
+        # # point_loss_box_pos = point_loss_box_src[pos_mask].sum()
+
+        # point_loss_box =torch.nan_to_num(torch.div(torch.sum(point_loss_box_src * pos_mask), torch.sum(pos_mask)))
+
+        # print("point_loss_box: ", point_loss_box)
+
+        # exit()
+        # point_loss_box_src = self.reg_loss_func(
+        #     point_box_preds[None, ...], point_box_labels[None, ...], weights=reg_weights[None, ...]
+        # )
+        # point_loss_box = point_loss_box_src.sum()
+        
+        # regression loss
+        point_reg_loss_box_src = self.reg_loss_func_aux(
+            point_box_preds[None, ...], point_box_labels[None, ...], weights=reg_weights[None, ...]
+        )
+        point_reg_loss_box = point_reg_loss_box_src.sum()
+
+        point_loss_box = point_reg_loss_box + point_iou_loss_box
+
+        loss_weights_dict = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS
+        point_loss_box = point_loss_box * loss_weights_dict['point_box_weight']
+        if tb_dict is None:
+            tb_dict = {}
+        tb_dict.update({'point_loss_box': point_loss_box.item()})
+        tb_dict.update({'point_reg_loss_box': point_reg_loss_box.item()})
+        tb_dict.update({'point_iou_loss_box': point_iou_loss_box.item()})
+        return point_loss_box, tb_dict
+
+
+    def get_cls_layer_loss(self, tb_dict=None):
+        point_cls_labels = self.forward_ret_dict['point_cls_labels'].view(-1)
+        point_cls_preds = self.forward_ret_dict['point_cls_preds'].view(-1, self.num_class)
+
+        positives = (point_cls_labels > 0)
+        negative_cls_weights = (point_cls_labels == 0) * 1.0
+        cls_weights = (negative_cls_weights + 1.0 * positives).float()
+        pos_normalizer = positives.sum(dim=0).float()
+        cls_weights /= torch.clamp(pos_normalizer, min=1.0)
+
+        one_hot_targets = point_cls_preds.new_zeros(*list(point_cls_labels.shape), self.num_class + 1)
+        one_hot_targets.scatter_(-1, (point_cls_labels * (point_cls_labels >= 0).long()).unsqueeze(dim=-1).long(), 1.0)
+        one_hot_targets = one_hot_targets[..., 1:]
+        cls_loss_src = self.cls_loss_func(point_cls_preds, one_hot_targets, weights=cls_weights)
+        point_loss_cls = cls_loss_src.sum()
+
+        loss_weights_dict = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS
+        point_loss_cls = point_loss_cls * loss_weights_dict['point_cls_weight']
+        if tb_dict is None:
+            tb_dict = {}
+        tb_dict.update({
+            'point_loss_cls': point_loss_cls.item(),
+            'point_pos_num': pos_normalizer.item()
+        })
+        return point_loss_cls, tb_dict
+
+
     def get_loss(self, tb_dict=None):
         tb_dict = {} if tb_dict is None else tb_dict
         point_loss_cls, tb_dict_1 = self.get_cls_layer_loss()
@@ -108,6 +202,7 @@ class VariablePointHeadBox(PointHeadTemplate):
             targets_dict = self.assign_targets(batch_dict)
             ret_dict['point_cls_labels'] = targets_dict['point_cls_labels']
             ret_dict['point_box_labels'] = targets_dict['point_box_labels']
+            ret_dict['point_coords'] = batch_dict['point_coords']
 
         if not self.training or self.predict_boxes_when_training:
             point_cls_preds, point_box_preds = self.generate_predicted_boxes(

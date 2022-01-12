@@ -28,8 +28,11 @@ def grid_sampling_gpu(input_coors,
     if (dimension is None and coor_offset is None):
         min_coors, _ = torch.min(input_coors, axis=0)
         max_coors, _ = torch.max(input_coors, axis=0)
+        # min_coors = min_coors - 0.5
+        # max_coors = max_coors + 0.5
         dimension = max_coors - min_coors
         coor_offset = -min_coors
+        # print(min_coors)
 
     dimension = torch.tensor(dimension, dtype=torch.float32, device=input_coors.device, requires_grad=False) #.to(input_coors.device).type(torch.float32)
     coor_offset = torch.tensor(coor_offset, dtype=torch.float32, device=input_coors.device, requires_grad=False) #.to(input_coors.device).type(torch.float32)
@@ -81,6 +84,8 @@ def voxel_sampling_idx_binary_gpu(input_coors,
     if (dimension is None and coor_offset is None):
         min_coors, _ = torch.min(input_coors, axis=0)
         max_coors, _ = torch.max(input_coors, axis=0)
+        # min_coors = min_coors - 0.5
+        # max_coors = max_coors + 0.5
         dimension = max_coors - min_coors
         coor_offset = -min_coors
 
@@ -150,7 +155,9 @@ def voxel_sampling_idx_gpu(input_coors,
 
     if (dimension is None and coor_offset is None):
         min_coors, _ = torch.min(input_coors, axis=0)
-        max_coors, _ = torch.max(input_coors, axis=0)
+        max_coors, _ = torch.max(input_coors, axis=0)        
+        # min_coors = min_coors - 0.5
+        # max_coors = max_coors + 0.5
         dimension = max_coors - min_coors
         coor_offset = -min_coors
 

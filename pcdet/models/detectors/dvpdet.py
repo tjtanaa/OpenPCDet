@@ -23,7 +23,7 @@ class DVPDET(Detector3DTemplate):
 
     def get_training_loss(self):
         disp_dict = {}
-        print("self.point_head: ", self.point_head)
+        # print("self.point_head: ", self.point_head)
         loss_point, tb_dict = self.point_head.get_loss()
         # loss_rcnn, tb_dict = self.roi_head.get_loss(tb_dict)
         loss = loss_point

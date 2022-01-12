@@ -11,6 +11,19 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+def nan_hook(self, inp, output):
+    if not isinstance(output, tuple):
+        outputs = [output]
+    else:
+        outputs = output
+
+    for i, out in enumerate(outputs):
+        nan_mask = torch.isnan(out)
+        if nan_mask.any():
+            print("In", self.__class__.__name__)
+            raise RuntimeError(f"Found NAN in output {i} at indices: ", nan_mask.nonzero(), "where:", out[nan_mask.nonzero()[:, 0].unique(sorted=True)])
+
+
 
 def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):

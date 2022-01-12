@@ -181,9 +181,12 @@ class DynamicPointConvBasicBlock(nn.Module):
                                                             grid_buffer_size=self.grid_buffer_size,
                                                             output_pooling_size=self.output_pooling_size)
         else:
-            voxel_idx = voxel_idx[center_idx]
-            features = input_features
-        
+            if self.subsample_res is not None: 
+                voxel_idx = voxel_idx[center_idx.type(torch.int64)]
+                features = input_features
+            else:
+                voxel_idx = voxel_idx
+                features = input_features
         # print("voxelidx: ", voxel_idx)
         # print("features.shape: ", features.shape)
         voxel_features = self.voxel_sampling_feature_method(features,
@@ -205,11 +208,19 @@ class DynamicPointConvBasicBlock(nn.Module):
             pass
         else:
             center_accum_num_list = torch.cumsum(center_num_list, dim=0)
-            output_feature_list.append(self.bn(output_features[None,:center_accum_num_list[0],:])[0,:,:])
+            output_feature_list.append(self.bn(torch.unsqueeze(output_features[:center_accum_num_list[0],:], dim=0))[0,:,:])
 
             for batch_id in range(1, center_num_list.shape[0]):
                 output_feature_list.append(
-                    self.bn(output_features[None,center_accum_num_list[batch_id-1]:center_accum_num_list[batch_id],:])[0,:,:])
+                    self.bn(torch.unsqueeze(output_features[center_accum_num_list[batch_id-1]:center_accum_num_list[batch_id],:], dim=0))[0,:,:])
+
+
+
+            # output_feature_list.append(self.bn(output_features[None,:center_accum_num_list[0],:])[0,:,:])
+
+            # for batch_id in range(1, center_num_list.shape[0]):
+            #     output_feature_list.append(
+            #         self.bn(output_features[None,center_accum_num_list[batch_id-1]:center_accum_num_list[batch_id],:])[0,:,:])
         # print("weight norm: ", torch.norm(self.weight))
         output_features = torch.cat(output_feature_list,axis=0)
         # print("After: output_features.shape: ", output_features.shape)

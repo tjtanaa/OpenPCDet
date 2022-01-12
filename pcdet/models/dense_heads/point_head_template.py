@@ -18,8 +18,8 @@ class PointHeadTemplate(nn.Module):
     def build_losses(self, losses_cfg):
         self.add_module(
             'cls_loss_func',
-            loss_utils.SigmoidFocalClassificationLoss(alpha=0.75, gamma=2.0)
-            # loss_utils.SigmoidFocalClassificationLoss(alpha=0.25, gamma=2.0)
+            # loss_utils.SigmoidFocalClassificationLoss(alpha=0.75, gamma=2.0)
+            loss_utils.SigmoidFocalClassificationLoss(alpha=0.25, gamma=2.0)
         )
         reg_loss_type = losses_cfg.get('LOSS_REG', None)
         if reg_loss_type == 'smooth-l1':
@@ -30,6 +30,12 @@ class PointHeadTemplate(nn.Module):
             self.reg_loss_func = loss_utils.WeightedSmoothL1Loss(
                 code_weights=losses_cfg.LOSS_WEIGHTS.get('code_weights', None)
             )
+        elif reg_loss_type == 'IoU3DLossVariablePointHead':
+            self.reg_loss_func = loss_utils.IoU3DLossVariablePointHead(pos_iou_threshold=losses_cfg.POS_IOU_THRESHOLD)
+            self.reg_loss_func_aux = loss_utils.WeightedSmoothL1Loss(
+                code_weights=losses_cfg.LOSS_WEIGHTS.get('code_weights', None)
+            )
+            
         else:
             self.reg_loss_func = F.smooth_l1_loss
 

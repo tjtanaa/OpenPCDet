@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 
+# torch.autograd.set_detect_anomaly(True)
+
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from pcdet.datasets import build_dataloader
 from pcdet.models import build_network, model_fn_decorator

@@ -114,11 +114,11 @@ def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, sa
         # intensity = np.sum(feature, axis=1)
         # Converter.compile(coors=coors[:,[1,2,0]],
         #                 intensity=intensity,
-        #                 task_name='inference_sample_' + str(i),
+        #                 task_name='regiou3d_inference_sample_' + str(i),
         #                 bbox_params=gt_bbox_params + pred_bbox_params)
         # # exit()
 
-        # if i == 10:
+        # if i == 100:
         #     exit()
 
         statistics_info(cfg, ret_dict, metric, disp_dict)

@@ -69,7 +69,7 @@ class DVPDetHead(RoIHeadTemplate):
         elif weight_init == 'xavier':
             init_func = nn.init.xavier_normal_
         elif weight_init == 'normal':
-            init_func = nn.init.normal_
+            # init_func = nn.init.normal_
             init_func = nn.init.trunc_normal_
         else:
             raise NotImplementedError

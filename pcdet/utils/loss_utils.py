@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import box_utils
+from .common_utils import nan_hook
 
 
 class SigmoidFocalClassificationLoss(nn.Module):
@@ -390,10 +391,10 @@ class RegLossCenterNet(nn.Module):
 
 class IoU3DLossVariablePointHead(nn.Module):
 
-    def __init__(self) -> None:
+    def __init__(self, pos_iou_threshold=0.25) -> None:
         super().__init__()
-        
-        self.eps = torch.constant(1e-6)
+        self.pos_iou_threshold = torch.tensor(pos_iou_threshold, dtype=torch.float32)
+        self.eps = torch.tensor(1e-6, dtype=torch.float32)
         
     def _roi_logits_to_attrs(self, base_coors, input_logits, anchor_size):
         anchor_diag = torch.sqrt(torch.pow(anchor_size[0], 2.) + torch.pow(anchor_size[1], 2.))
@@ -407,10 +408,10 @@ class IoU3DLossVariablePointHead(nn.Module):
 
         r = torch.clamp(torch.atan2(input_logits[:,6], input_logits[:,7]), -1e7, 1e7)
 
-        return torch.stack([w, l, h, x, y, z, r], axis=-1)
+        return torch.stack([w, l, h, x, y, z, r], dim=-1)
 
     def _get_rotation_matrix(self, r):
-        rotation_matrix = torch.stack([torch.cos(r), -torch.sin(r), torch.sin(r), torch.cos(r)], axis=-1)
+        rotation_matrix = torch.stack([torch.cos(r), -torch.sin(r), torch.sin(r), torch.cos(r)], dim=-1)
         rotation_matrix = torch.reshape(rotation_matrix, shape=[-1, 2, 2]) # [n, 2, 2]
         return rotation_matrix
 
@@ -421,11 +422,11 @@ class IoU3DLossVariablePointHead(nn.Module):
         gt_y = gt_attrs[:, 4]  # [n]
         gt_r = gt_attrs[:, 6]  # [n]
 
-        gt_v0 = torch.stack([gt_w / 2, -gt_l / 2], axis=-1)  # [n, 2]
-        gt_v1 = torch.stack([gt_w / 2, gt_l / 2], axis=-1)  # [n, 2]
-        gt_v2 = torch.stack([-gt_w / 2, gt_l / 2], axis=-1)  # [n, 2]
-        gt_v3 = torch.stack([-gt_w / 2, -gt_l / 2], axis=-1)  # [n, 2]
-        gt_v = torch.stack([gt_v0, gt_v1, gt_v2, gt_v3], axis=1)  # [n, 4, 2]
+        gt_v0 = torch.stack([gt_w / 2, -gt_l / 2], dim=-1)  # [n, 2]
+        gt_v1 = torch.stack([gt_w / 2, gt_l / 2], dim=-1)  # [n, 2]
+        gt_v2 = torch.stack([-gt_w / 2, gt_l / 2], dim=-1)  # [n, 2]
+        gt_v3 = torch.stack([-gt_w / 2, -gt_l / 2], dim=-1)  # [n, 2]
+        gt_v = torch.stack([gt_v0, gt_v1, gt_v2, gt_v3], dim=1)  # [n, 4, 2]
 
         pred_w = pred_attrs[:, 0]  # [n]
         pred_l = pred_attrs[:, 1]  # [n]
@@ -436,24 +437,28 @@ class IoU3DLossVariablePointHead(nn.Module):
         rel_x = pred_x - gt_x  # [n]
         rel_y = pred_y - gt_y  # [n]
         rel_r = pred_r - gt_r  # [n]
-        rel_xy = torch.unsqueeze(torch.stack([rel_x, rel_y], axis=-1), axis=1)  # [n, 1, 2]
+        rel_xy = torch.unsqueeze(torch.stack([rel_x, rel_y], dim=-1), dim=1)  # [n, 1, 2]
 
-        pred_v0 = torch.stack([pred_w / 2, -pred_l / 2], axis=-1)  # [n, 2]
-        pred_v1 = torch.stack([pred_w / 2, pred_l / 2], axis=-1)  # [n, 2]
-        pred_v2 = torch.stack([-pred_w / 2, pred_l / 2], axis=-1)  # [n, 2]
-        pred_v3 = torch.stack([-pred_w / 2, -pred_l / 2], axis=-1)  # [n, 2]
-        pred_v = torch.stack([pred_v0, pred_v1, pred_v2, pred_v3], axis=1)  # [n, 4, 2]
+        pred_v0 = torch.stack([pred_w / 2, -pred_l / 2], dim=-1)  # [n, 2]
+        pred_v1 = torch.stack([pred_w / 2, pred_l / 2], dim=-1)  # [n, 2]
+        pred_v2 = torch.stack([-pred_w / 2, pred_l / 2], dim=-1)  # [n, 2]
+        pred_v3 = torch.stack([-pred_w / 2, -pred_l / 2], dim=-1)  # [n, 2]
+        
+        pred_v = torch.stack([pred_v0, pred_v1, pred_v2, pred_v3], dim=1)  # [n, 4, 2]
+        
+        # print(self._get_rotation_matrix(rel_r).shape)
+        # print(torch.transpose(pred_v, 1, 2).shape)
 
-        rot_pred_v = torch.transpose(torch.matmul(a=self.get_rotation_matrix(rel_r), b=pred_v, transpose_b=True),
-                                perm=[0, 2, 1])  # [n, 4, 2]
-        rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-gt_r), b=rel_xy, transpose_b=True),
-                                perm=[0, 2, 1])  # [n, 1, 2]
+        rot_pred_v = torch.permute(torch.bmm(self._get_rotation_matrix(rel_r), torch.transpose(pred_v, 1, 2)),
+                                dims=[0, 2, 1])  # [n, 4, 2]
+        rot_rel_xy = torch.permute(torch.bmm(self._get_rotation_matrix(-gt_r), torch.transpose(rel_xy, 1, 2)),
+                                dims=[0, 2, 1])  # [n, 1, 2]
         rel_rot_pred_v = rot_pred_v + rot_rel_xy  # [n, 4, 2]
 
-        rot_gt_v = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-rel_r), b=gt_v, transpose_b=True),
-                                perm=[0, 2, 1])  # [n, 4, 2]
-        rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-pred_r), b=-rel_xy, transpose_b=True),
-                                perm=[0, 2, 1])  # [n, 1, 2]
+        rot_gt_v = torch.permute(torch.bmm(self._get_rotation_matrix(-rel_r), torch.transpose(gt_v, 1, 2)),
+                                dims=[0, 2, 1])  # [n, 4, 2]
+        rot_rel_xy = torch.permute(torch.bmm(self._get_rotation_matrix(-pred_r), torch.transpose(-rel_xy, 1, 2)),
+                                dims=[0, 2, 1])  # [n, 1, 2]
         rel_rot_gt_v = rot_gt_v + rot_rel_xy  # [n, 4, 2]
 
         # [n, 2, 2] @ [n, 2, 4] = [n, 2, 4] -> [n, 4, 2]
@@ -471,29 +476,29 @@ class IoU3DLossVariablePointHead(nn.Module):
             v1_x = rel_rot_pred_v[:, i + 1, 0]  # [n]
             v1_y = rel_rot_pred_v[:, i + 1, 1]  # [n]
 
-            kx = torch.nan_to_num(torch.div(v1_y - v0_y, v1_x - v0_x))
-            bx = torch.nan_to_num(torch.div(v0_y * v1_x - v1_y * v0_x, v1_x - v0_x))
-            ky = torch.nan_to_num(torch.div(v1_x - v0_x, v1_y - v0_y))
-            by = torch.nan_to_num(torch.div(v1_y * v0_x - v0_y * v1_x, v1_y - v0_y))
+            kx = torch.nan_to_num(torch.div(v1_y - v0_y, v1_x - v0_x + self.eps))
+            bx = torch.nan_to_num(torch.div(v0_y * v1_x - v1_y * v0_x, v1_x - v0_x + self.eps))
+            ky = torch.nan_to_num(torch.div(v1_x - v0_x, v1_y - v0_y + self.eps))
+            by = torch.nan_to_num(torch.div(v1_y * v0_x - v0_y * v1_x, v1_y - v0_y + self.eps))
 
             # kx = (v1_y - v0_y) / (v1_x - v0_x + eps) # [n]
             # bx = (v0_y * v1_x - v1_y * v0_x) / (v1_x - v0_x + eps) # [n]
             # ky = (v1_x - v0_x) / (v1_y - v0_y + eps) # [n]
             # by = (v1_y * v0_x - v0_y * v1_x) / (v1_y - v0_y + eps) # [n]
 
-            p0 = torch.stack([gt_w / 2, kx * gt_w / 2 + bx], axis=-1)  # [n, 2]
-            p1 = torch.stack([-gt_w / 2, -kx * gt_w / 2 + bx], axis=-1)  # [n, 2]
-            p2 = torch.stack([ky * gt_l / 2 + by, gt_l / 2], axis=-1)  # [n, 2]
-            p3 = torch.stack([-ky * gt_l / 2 + by, -gt_l / 2], axis=-1)  # [n, 2]
-            p = torch.stack([p0, p1, p2, p3], axis=1)  # [n, 4, 2]
+            p0 = torch.stack([gt_w / 2, kx * gt_w / 2 + bx], dim=-1)  # [n, 2]
+            p1 = torch.stack([-gt_w / 2, -kx * gt_w / 2 + bx], dim=-1)  # [n, 2]
+            p2 = torch.stack([ky * gt_l / 2 + by, gt_l / 2], dim=-1)  # [n, 2]
+            p3 = torch.stack([-ky * gt_l / 2 + by, -gt_l / 2], dim=-1)  # [n, 2]
+            p = torch.stack([p0, p1, p2, p3], dim=1)  # [n, 4, 2]
             output_points.append(p)
-        output_points = torch.concat(output_points, axis=1)  # [n, 16, 2]
+        output_points = torch.concat(output_points, dim=1)  # [n, 16, 2]
         return output_points
 
 
     def _get_interior_vertex_points_mask(self, target_attrs, input_points):
-        target_w = torch.unsqueeze(target_attrs[:, 0], axis=1)  # [n, 1, 16]
-        target_l = torch.unsqueeze(target_attrs[:, 1], axis=1)  # [n, 1, 16]
+        target_w = torch.unsqueeze(target_attrs[:, 0], dim=1)  # [n, 1, 16]
+        target_l = torch.unsqueeze(target_attrs[:, 1], dim=1)  # [n, 1, 16]
         target_x = target_w / 2  # [n, 4]
         target_y = target_l / 2  # [n, 4]
         x_mask = torch.le(torch.abs(input_points[:, :, 0]), target_x).type(torch.float32)  # [n, 4]
@@ -503,15 +508,15 @@ class IoU3DLossVariablePointHead(nn.Module):
     def _get_intersection_points_mask(self, target_attrs, input_points, rel_xy=None, rel_r=None):
         if rel_xy is not None and rel_r is not None:
             pred_r = target_attrs[:, 6]  # [n]
-            rot_input_points = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-rel_r), b=input_points, transpose_b=True),
-                                            perm=[0, 2, 1])  # [n, 16, 2]
-            rot_rel_xy = torch.transpose(torch.matmul(a=self.get_rotation_matrix(-pred_r), b=-rel_xy, transpose_b=True),
-                                    perm=[0, 2, 1])  # [n, 1, 2]
+            rot_input_points = torch.permute(torch.bmm(self._get_rotation_matrix(-rel_r), torch.transpose(input_points, 1, 2)),
+                                            dims=[0, 2, 1])  # [n, 16, 2]
+            rot_rel_xy = torch.permute(torch.bmm(self._get_rotation_matrix(-pred_r), torch.transpose(-rel_xy, 1, 2)),
+                                    dims=[0, 2, 1])  # [n, 1, 2]
             rel_rot_input_points = rot_input_points + rot_rel_xy
         else:
             rel_rot_input_points = input_points
-        target_w = torch.unsqueeze(target_attrs[:, 0], axis=1)  # [n, 1, 16]
-        target_l = torch.unsqueeze(target_attrs[:, 1], axis=1)  # [n, 1, 16]
+        target_w = torch.unsqueeze(target_attrs[:, 0], dim=1)  # [n, 1, 16]
+        target_l = torch.unsqueeze(target_attrs[:, 1], dim=1)  # [n, 1, 16]
         target_x = target_w / 2 + 1e-3  # [n, 4]
         target_y = target_l / 2 + 1e-3  # [n, 4]
         # target_x = 1000  # [n, 4]
@@ -522,10 +527,10 @@ class IoU3DLossVariablePointHead(nn.Module):
 
 
     def _clockwise_sorting(self, input_points, masks):
-        coors_masks = torch.stack([masks, masks], axis=-1)  # [n, 24, 2]
+        coors_masks = torch.stack([masks, masks], dim=-1)  # [n, 24, 2]
         masked_points = input_points * coors_masks
-        centers = torch.nan_to_num(torch.div(torch.sum(masked_points, axis=1, keepdim=True),
-                                        (torch.sum(coors_masks, axis=1, keepdim=True))))  # [n, 1, 2]
+        centers = torch.nan_to_num(torch.div(torch.sum(masked_points, dim=1, keepdim=True),
+                                        (torch.sum(coors_masks, dim=1, keepdim=True))))  # [n, 1, 2]
         rel_vectors = input_points - centers  # [n, 24, 2]
         base_vector = rel_vectors[:, :1, :]  # [n, 1, 2]
         # https://stackoverflow.com/questions/14066933/direct-way-of-computing-clockwise-angle-between-2-vectors/16544330#16544330
@@ -534,16 +539,29 @@ class IoU3DLossVariablePointHead(nn.Module):
         angles = torch.atan2(det + self.eps, dot + self.eps)  # [n, 24] -pi~pi
         angles_masks = (0.5 - (masks - 0.5)) * 1000.  # [n, 24]
         masked_angles = angles + angles_masks  # [n, 24]
-        _, sort_idx = torch.topk(-masked_angles, k=input_points.get_shape().as_list()[1], sorted=True)  # [n, 24]
+        _, sort_idx = torch.topk(-masked_angles, k=input_points.shape[1], sorted=True)  # [n, 24]
 
-        batch_id = torch.range(start=0, limit=input_points.shape[0], dtype=torch.int32)
-        batch_ids = torch.stack([batch_id] * input_points.get_shape().as_list()[1], axis=1)
-        sort_idx = torch.stack([batch_ids, sort_idx], axis=-1)  # [n, 24, 2]
+        batch_id = torch.arange(start=0, end=input_points.shape[0], dtype=torch.long).to(input_points.device)
+        batch_ids = torch.stack([batch_id] * input_points.shape[1], dim=1)
 
+        # print("batch_ids: ", batch_ids.shape)
+        # print("sort_idx: ", sort_idx.shape)
+        # sort_idx = torch.stack([batch_ids, sort_idx], dim=-1)  # [n, 24, 2]
+
+        # print(sort_idx)
+        # print("sort_idx: ", sort_idx.shape)
         
-        sorted_points = input_points.index_select(0, sort_idx)
-        sorted_masks = masks.index_select(0, sort_idx)
+        # print("masks.shape: ", masks.shape)
+        # print("input_points.shape: ", input_points.shape)
+        sorted_points = input_points[batch_ids.view(-1), sort_idx.view(-1), :]
+        sorted_masks = masks[batch_ids.view(-1), sort_idx.view(-1)]
 
+        sorted_points = torch.reshape(sorted_points, input_points.shape)
+        sorted_masks = torch.reshape(sorted_masks, masks.shape)
+
+        sorted_points = torch.clamp(sorted_points, -1e7, 1e7)
+        # print("sorted_points.shape: ", sorted_points.shape)
+        # print("sorted_masks.shape: ", sorted_masks.shape)
         # sorted_points = tf.gather_nd(input_points, sort_idx)
         # sorted_masks = tf.gather_nd(masks, sort_idx)
 
@@ -553,17 +571,43 @@ class IoU3DLossVariablePointHead(nn.Module):
 
     def _shoelace_intersection_area(self, sorted_points, sorted_masks):
         # https://en.wikipedia.org/wiki/Shoelace_formula
-        sorted_points = sorted_points * torch.stack([sorted_masks, sorted_masks], axis=-1)  # [n, 24, 2]
-        last_vertex_id = (torch.sum(sorted_masks, axis=1) - 1).type(torch.int32)  # [n] coors where idx=-1 will be convert to [0., 0.], so it's safe.
-        last_vertex_id = torch.stack([torch.range(start=0, limit=sorted_points.shape[0], dtype=torch.int32), last_vertex_id],
-                                axis=-1)  # [n, 2]
-        last_vertex_to_duplicate = torch.unsqueeze(sorted_points.index_select(0, last_vertex_id), axis=1)  # [n, 1, 2]
-        padded_sorted_points = torch.cat([last_vertex_to_duplicate, sorted_points], axis=1)  # [n, 24+1, 2]
+        # print("sorted_points.shape: ", sorted_points.shape, sorted_masks.shape, torch.unique(sorted_masks))
+        # print( torch.stack([sorted_masks, sorted_masks], dim=-1).shape)
+        # print("sorted_points: ", torch.sum(torch.isnan(sorted_points)))
+        # print("sorted_masks: ", torch.sum(torch.isnan(sorted_masks)))
+        # print("torch.stack([sorted_masks, sorted_masks], dim=-1): ", torch.sum(torch.isnan(torch.stack([sorted_masks, sorted_masks], dim=-1))))
+        # duplicated_sorted_masks = torch.stack([sorted_masks, sorted_masks], dim=-1)
+        # print(torch.min(duplicated_sorted_masks), torch.max(duplicated_sorted_masks))
+        # print("sorted_points.shape: ", sorted_points.shape)
+        sorted_points = sorted_points * torch.stack([sorted_masks, sorted_masks], dim=-1)  # [n, 24, 2]
+        # print(sorted_masks.shape)
+        # print("sorted_points: ", torch.sum(torch.isnan(sorted_points)))
+        last_vertex_id = (torch.sum(sorted_masks, dim=1) - 1).type(torch.long)  # [n] coors where idx=-1 will be convert to [0., 0.], so it's safe.
+        # print(torch.range(start=0, end=sorted_points.shape[0]-1, dtype=torch.int32).shape, last_vertex_id.shape)
+        # last_vertex_id = torch.stack([torch.range(start=0, end=sorted_points.shape[0]-1, dtype=torch.int32).to(sorted_points.device), last_vertex_id],
+        #                         dim=-1)  # [n, 2]
+
+        # print("last_vertex_id: ", torch.sum(torch.isnan(last_vertex_id)))
+        batch_id = torch.arange(start=0, end=sorted_points.shape[0], dtype=torch.long).to(sorted_points.device)
+
+        # print("sorted_points.shape: ", sorted_points.shape)
+        last_vertex_to_duplicate = sorted_points[batch_id, last_vertex_id, :]
+        # print("last_vertex_to_duplicate: ", last_vertex_to_duplicate)
+        # print("last_vertex_to_duplicate: ", torch.sum(torch.isnan(last_vertex_to_duplicate)))
+        # print(last_vertex_to_duplicate.shape, last_vertex_id.shape)
+        last_vertex_to_duplicate = torch.reshape(last_vertex_to_duplicate, (last_vertex_id.shape[0], 2))
+        # print("last_vertex_to_duplicate: ", torch.sum(torch.isnan(last_vertex_to_duplicate)))
+
+        last_vertex_to_duplicate = torch.unsqueeze(last_vertex_to_duplicate, dim=1)  # [n, 1, 2]
+        # print("last_vertex_to_duplicate: ", torch.sum(torch.isnan(last_vertex_to_duplicate)))
+        # print("last_vertex_to_duplicate.shape: ", last_vertex_to_duplicate.shape)
+        padded_sorted_points = torch.cat([last_vertex_to_duplicate, sorted_points], dim=1)  # [n, 24+1, 2]
+        # print("padded_sorted_points: ", torch.sum(torch.isnan(padded_sorted_points)))
         x_i = padded_sorted_points[:, :-1, 0]  # [n, 24]
         x_i_plus_1 = padded_sorted_points[:, 1:, 0]  # [n, 24]
         y_i = padded_sorted_points[:, :-1, 1]  # [n, 24]
         y_i_plus_1 = padded_sorted_points[:, 1:, 1]  # [n, 24]
-        area = 0.5 * torch.sum(x_i * y_i_plus_1 - x_i_plus_1 * y_i, axis=-1)  # [n]
+        area = 0.5 * torch.sum(x_i * y_i_plus_1 - x_i_plus_1 * y_i, dim=-1)  # [n]
         return area
 
 
@@ -578,7 +622,7 @@ class IoU3DLossVariablePointHead(nn.Module):
         pred_high = pred_z + 0.5 * pred_h
         top = torch.minimum(gt_high, pred_high)
         bottom = torch.maximum(gt_low, pred_low)
-        intersection_height = F.ReLU(top - bottom)
+        intersection_height = F.relu(top - bottom)
         return intersection_height
 
 
@@ -586,37 +630,105 @@ class IoU3DLossVariablePointHead(nn.Module):
         intersection_volume = intersection_2d_area * intersection_height
         gt_volume = gt_attrs[:, 0] * gt_attrs[:, 1] * gt_attrs[:, 2]
         pred_volume = pred_attrs[:, 0] * pred_attrs[:, 1] * pred_attrs[:, 2]
+        # print("gt_volume + pred_volume - intersection_volume: ", gt_volume, pred_volume, intersection_volume)
         iou = torch.nan_to_num(torch.div(intersection_volume, gt_volume + pred_volume - intersection_volume))
         # tf.summary.scalar('iou_nan_sum',
         #                   hvd.allreduce(tf.reduce_sum(tf.cast(tf.is_nan(iou), dtype=tf.float32)), average=False))
         if clip:
-            iou = torch.where(torch.is_nan(iou), torch.zeros_like(iou), iou)
+            iou = torch.where(torch.is_nan(iou), torch.zeros_like(iou).to(gt_attrs.device), iou)
         return iou
 
 
 
     def _cal_3d_iou(self, gt_attrs, pred_attrs, clip=False):
         gt_v, rel_rot_pred_v, rel_rot_gt_v, rel_xy, rel_r = self._get_2d_vertex_points(gt_attrs, pred_attrs)
+        
+        # gt_v.register_forward_hook(nan_hook)
+        # rel_rot_pred_v.register_forward_hook(nan_hook)
+        # rel_rot_gt_v.register_forward_hook(nan_hook)
+        # rel_xy.register_forward_hook(nan_hook)
+        # rel_r.register_forward_hook(nan_hook)
+
+        # print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ \n $$$$$$$$$$ \n \n New iou")
+        # print("gt_v: ", torch.sum(torch.isnan(gt_v)))
+        # print("rel_rot_pred_v: ", torch.sum(torch.isnan(rel_rot_pred_v)))
+        # print("rel_rot_gt_v: ", torch.sum(torch.isnan(rel_rot_gt_v)))
+        # print("rel_xy: ", torch.sum(torch.isnan(rel_xy)))
+        # print("rel_r: ", torch.sum(torch.isnan(rel_r)))
+
+        # exit()
         intersection_points = self._get_2d_intersection_points(gt_attrs=gt_attrs, rel_rot_pred_v=rel_rot_pred_v)
+
+        # intersection_points.register_forward_hook(nan_hook)
+        
+        # print("intersection_points: ", torch.sum(torch.isnan(intersection_points)))
+        # exit()
+
+
         gt_vertex_points_inside_pred = self._get_interior_vertex_points_mask(target_attrs=pred_attrs, input_points=rel_rot_gt_v)
+        # print("gt_vertex_points_inside_pred: ", torch.sum(torch.isnan(gt_vertex_points_inside_pred)))
+        # gt_vertex_points_inside_pred.register_forward_hook(nan_hook)
+        # exit()
         pred_vertex_points_inside_gt = self._get_interior_vertex_points_mask(target_attrs=gt_attrs, input_points=rel_rot_pred_v)
+        # print("pred_vertex_points_inside_gt: ", torch.sum(torch.isnan(pred_vertex_points_inside_gt)))
+        # pred_vertex_points_inside_gt.register_forward_hook(nan_hook)
+        # exit()
         pred_intersect_with_gt = self._get_intersection_points_mask(target_attrs=gt_attrs, input_points=intersection_points)
+        # print("pred_intersect_with_gt: ", torch.sum(torch.isnan(pred_intersect_with_gt)))
+        # pred_intersect_with_gt.register_forward_hook(nan_hook)
+        # exit()
         intersection_points_inside_pred = self._get_intersection_points_mask(target_attrs=pred_attrs,
                                                                     input_points=intersection_points, rel_xy=rel_xy,
                                                                     rel_r=rel_r)
-        total_points = torch.cat([gt_v, rel_rot_pred_v, intersection_points], axis=1)
+        # print("intersection_points_inside_pred: ", torch.sum(torch.isnan(intersection_points_inside_pred)))
+        # intersection_points_inside_pred.register_forward_hook(nan_hook)
+        # exit()
+
+        total_points = torch.cat([gt_v, rel_rot_pred_v, intersection_points], dim=1)
+        # print("total_points: ", torch.sum(torch.isnan(total_points)))
+        # total_points.register_forward_hook(nan_hook)
+        # exit()
         total_masks = torch.cat([gt_vertex_points_inside_pred, pred_vertex_points_inside_gt,
-                                pred_intersect_with_gt * intersection_points_inside_pred], axis=1)
+                                pred_intersect_with_gt * intersection_points_inside_pred], dim=1)
+        # print("total_masks: ", torch.sum(torch.isnan(total_masks)))
+        # total_masks.register_forward_hook(nan_hook)
+
         sorted_points, sorted_masks = self._clockwise_sorting(input_points=total_points, masks=total_masks)
+
+        # print("sorted_points: ", torch.sum(torch.isnan(sorted_points)))
+        # print("sorted_masks: ", torch.sum(torch.isnan(sorted_masks)))
+        # sorted_points.register_forward_hook(nan_hook)
+        # sorted_masks.register_forward_hook(nan_hook)
 
         intersection_2d_area = self._shoelace_intersection_area(sorted_points, sorted_masks)
         intersection_height = self._get_intersection_height(gt_attrs, pred_attrs)
+
+        # print("intersection_2d_area: ", torch.sum(torch.isnan(intersection_2d_area)))
+        # print("intersection_height: ", torch.sum(torch.isnan(intersection_height)))
+        # intersection_2d_area.register_forward_hook(nan_hook)
+        # intersection_height.register_forward_hook(nan_hook)
+
         ious = self._get_3d_iou_from_area(gt_attrs, pred_attrs, intersection_2d_area, intersection_height, clip)
+
+        # print("ious: ", torch.sum(torch.isnan(ious)))
+        # ious.register_forward_hook(nan_hook)
+        # exit()
 
         return ious
 
-    def forward(self):
-        pass
+    def forward(self, gt_attrs, pred_attrs, mask, clip=False):
+
+        ious = self._cal_3d_iou(gt_attrs[:,[3,4,5, 0,1,2,6]], pred_attrs[:,[3,4,5, 0,1,2,6]], clip=clip)
+
+        # pos_ious = ious[ious > self.pos_iou_threshold]
+        pos_thres_mask = ious > self.pos_iou_threshold
+        # print("pos_thres_mask: ", torch.sum(pos_thres_mask))
+        point_loss_box_src = 1. - ious
+        # point_loss_box_pos = point_loss_box_src[pos_mask].sum()
+
+        point_loss_box =torch.nan_to_num(torch.div(torch.sum(point_loss_box_src * mask * pos_thres_mask), torch.sum(mask * pos_thres_mask) + self.eps))
+
+        return point_loss_box
 
 
 
